@@ -1,7 +1,28 @@
 import streamlit as st
 import pandas as pd
 import joblib
-from sklearn.preprocessing import StandardScaler
+import torch
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+from torch import nn
+
+class CFraud(nn.Module):
+    def __init__(self, layers_sz, in_sz, out_sz):
+        super(CFraud, self).__init__()
+        layers = []
+        for sz in layers_sz:
+            layers.append(nn.Linear(in_sz, sz))
+            in_sz = sz
+        self.linears = nn.ModuleList(layers)
+        self.out = nn.Linear(layers_sz[-1], out_sz)
+        self.act_func = nn.ReLU()
+        self.output_activation = nn.Sigmoid()
+    
+    def forward(self, x):
+        for layer in self.linears:
+            x = self.act_func(layer(x))
+        x = self.output_activation(self.out(x))
+        return x
 
 CATEGORY_LIST = ('misc_net', 'grocery_pos', 'entertainment', 'gas_transport',
                 'misc_pos', 'grocery_net', 'shopping_net', 'shopping_pos',
@@ -244,6 +265,7 @@ def load_model(model_path):
     return joblib.load(model_path)
 
 saved_columns = joblib.load('model_columns.pkl')
+
 def preprocess_input(input_df):
     #1. Encode categorical variable
     category_df = pd.get_dummies(input_df['category'], prefix='category').astype(int)
@@ -257,7 +279,7 @@ def preprocess_input(input_df):
     
     input_df['gender'].replace({'M': 0, 'F': 1}, inplace=True)
     
-    scaler = StandardScaler()
+    scaler = MinMaxScaler()
     input_df['amount'] = scaler.fit_transform(input_df[['amount']])
     input_df['city_pop'] = scaler.fit_transform(input_df[['city_pop']])
     
@@ -290,32 +312,32 @@ def main():
     
     if uploaded_file is not None:
         input_data = pd.read_csv(uploaded_file)
-    
-    category = st.sidebar.selectbox(
+    else:
+        category = st.sidebar.selectbox(
                 'Category',
                 CATEGORY_LIST
             )
-    amount = st.sidebar.number_input("Transaction Amount:", min_value=0.0, step=1.0)
-    gender = st.sidebar.selectbox('Gender',('M','F'))
-    state = st.sidebar.selectbox(
-                'State', 
-                STATE_LIST
+        amount = st.sidebar.number_input("Transaction Amount:", min_value=0.0, step=1.0)
+        gender = st.sidebar.selectbox('Gender',('M','F'))
+        state = st.sidebar.selectbox(
+                    'State', 
+                    STATE_LIST
+                )
+        job = st.sidebar.selectbox(
+                'Job Title',
+                JOB_LIST
             )
-    job = st.sidebar.selectbox(
-            'Job Title',
-            JOB_LIST
-        )
-    city_pop = st.sidebar.number_input('City Pop')
-    
-    # Collect inputs into a DataFrame
-    input_data = pd.DataFrame({
-        "category": [category],
-        "amount": [amount],
-        "gender": [gender],
-        "state": [state],
-        "job": [job],
-        "city_pop": [city_pop]
-    })
+        city_pop = st.sidebar.number_input('City Pop')
+        
+        # Collect inputs into a DataFrame
+        input_data = pd.DataFrame({
+            "category": [category],
+            "amount": [amount],
+            "gender": [gender],
+            "state": [state],
+            "job": [job],
+            "city_pop": [city_pop]
+        })
     
     st.write("Input Data Preview")
     st.write(input_data)
@@ -325,21 +347,42 @@ def main():
         model = load_model("../models/lg_model1.pt")
     elif model_choice == "Model 2: Random Forest":
         model = load_model("../models/rf_model1.pt")
-    elif model_choice == "Model 3: ANN":
-        model = load_model("../models/model_fraud_1.pt")
+    elif model_choice == "Model: Artificial Neural Network":
+        # from cfraud import CFraud  
+        model = CFraud(layers_sz=[300, 150], in_sz=562, out_sz=1)
+        model = torch.load('../models/ann_model_update_10.pt')
+        model.eval()
 
+        
     # Predict button
     if st.button("Predict"):
         # Preprocess the input data
         preprocessed_data = preprocess_input(input_data)
+        
+        if model_choice == "Model: Artificial Neural Network":
+            # Convert to tensor for PyTorch model
+            preprocessed_data = torch.tensor(preprocessed_data, dtype=torch.float32)
+            preprocessed_data = preprocessed_data.unsqueeze(0)  # Ensure batch dimension for a single input
+            
+            # Perform prediction with ANN
+            with torch.no_grad():
+                outputs = model(preprocessed_data)  # Get raw outputs
+                fraud_prob = torch.sigmoid(outputs).item()  # Sigmoid for binary probability
+                prediction = 1 if fraud_prob >= 0.5 else 0  # Threshold for binary classification
+        else:
+            # For other models (e.g., logistic regression, random forest)
+            prediction = model.predict(preprocessed_data)
+            prediction_prob = model.predict_proba(preprocessed_data)
+            fraud_prob = prediction_prob[0][1]  # Probability of "Fraud"
 
-        # Make prediction
-        prediction = model.predict(preprocessed_data)
-        prediction_prob = model.predict_proba(preprocessed_data)
+        # Compute complementary probability
+        not_fraud_prob = 1 - fraud_prob
 
         # Display the result
-        st.write("Prediction:", "Fraud" if prediction[0] == 1 else "Not Fraud")
-        st.write(f"Prediction Probability: {prediction_prob[0][1]:.2f}")
+        st.write("Prediction:", "Fraud" if prediction == 1 else "Not Fraud")
+        st.write(f"Prediction Probability (Not Fraud): {not_fraud_prob:.2f}")
+        st.write(f"Prediction Probability (Fraud): {fraud_prob:.2f}")
+
 
 # Run the app
 if __name__ == "__main__":
