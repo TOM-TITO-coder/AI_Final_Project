@@ -312,32 +312,6 @@ def main():
     
     if uploaded_file is not None:
         input_data = pd.read_csv(uploaded_file)
-    else:
-        category = st.sidebar.selectbox(
-                'Category',
-                CATEGORY_LIST
-            )
-        amount = st.sidebar.number_input("Transaction Amount:", min_value=0.0, step=1.0)
-        gender = st.sidebar.selectbox('Gender',('M','F'))
-        state = st.sidebar.selectbox(
-                    'State', 
-                    STATE_LIST
-                )
-        job = st.sidebar.selectbox(
-                'Job Title',
-                JOB_LIST
-            )
-        city_pop = st.sidebar.number_input('City Pop')
-        
-        # Collect inputs into a DataFrame
-        input_data = pd.DataFrame({
-            "category": [category],
-            "amount": [amount],
-            "gender": [gender],
-            "state": [state],
-            "job": [job],
-            "city_pop": [city_pop]
-        })
     
     st.write("Input Data Preview")
     st.write(input_data)
